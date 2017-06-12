@@ -1,0 +1,7 @@
+<?php
+
+class wasCreds
+{
+    const WEBADVISOR_USERNAME = '';
+    const WEBADVISOR_PASS = '';
+}
