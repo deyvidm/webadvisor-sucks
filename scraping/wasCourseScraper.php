@@ -9,6 +9,7 @@ class wasCourseScraper
 	 */
 
 	const VERBOSE = true;
+	const REQUEST_TYPES = ['GET', 'POST'];
 
 	function __construct()
 	{
@@ -32,7 +33,7 @@ class wasCourseScraper
 	 */
 	private function logIn($user, $pass)
 	{
-		$response = $this->get("https://webadvisor.uoguelph.ca");
+		$response = $this->request("GET", "https://webadvisor.uoguelph.ca");
 		preg_match("/\'(https.*)\'/", $response, $matches);
 
 		if(empty($matches)) {
@@ -42,56 +43,79 @@ class wasCourseScraper
 		$url = "https://webadvisor.uoguelph.ca/WebAdvisor/WebAdvisor";
 		$query = [
 			"TYPE" => "M",
-			"PID"  => "CORE-WBMAIN"];
-		$this->get($url, $query);
+			"PID"  => "CORE-WBMAIN"
+		];
+		$this->request("GET", $url, $query);
 
 		$query["TOKENIDX"] = "";
-		$response = $this->get($url, $query);
+		$response = $this->request("GET", $url, $query);
 		preg_match("/Set-Cookie: LASTTOKEN=(.*)/", $response, $matches);
 
-		$token = $matches[1];
+		$token = trim($matches[1]);
 		$query['TOKENIDX'] = $token;
-		$this->get($url, $query);
+		$this->request("GET", $url, $query);
+
+		$returnUrl = $this->formatQuery($url, $query);
 
 		$query = [
 			"type"     => "P",
 			"pid"      => "UT-LGRQ",
-			"TOKENIDX" => $token];
-		$this->get($url, $query);
+			"TOKENIDX" => $token
+		];
+		$response = $this->request("GET", $url, $query);
 
-		$returnUrl = $this->formatQuery($url, $query);
-		$post_fields = [
+		preg_match("/Location: (https.*)/i", $response, $matches);
+		$this->request("GET", $matches[1]);
+
+		$postData = [
 			"USER.NAME"  => $user,
 			"CURR.PWD"   => $pass,
-			"RETURN.URL" => $returnUrl];
+			"RETURN.URL" => $returnUrl
+		];
 		$query = [
 			"TOKENIDX"       => $token,
 			"SS"             => "LGRQ",
 			"URL"            => $returnUrl,
-			"SUBMIT_OPTIONS" => ""];
+		];
+		$response = $this->request("POST", $url, $query, $postData);
+
+		preg_match("/Location: (https.*)/i", $response, $matches);
+		$response = $this->request("GET", $matches[1]);
 	}
 
 	/**
 	 * Perform a GET request against a URL.
 	 *
-	 * @param string $url         The URl to request against.
-	 * @param array  $queryParams Associative array of key-value params.
+	 * @param string $type        The type of requests (GET, POST, etc.)
+	 * @param string $url         The URL to request against.
+	 * @param array  $queryParams Associative array of key-value params (URL query).
+	 * @param array  $postData    Associative array of key-value params (post data).
 	 *
-	 * @return string GET request response.
+	 * @return string The server's response.
 	 * @throws Exception
 	 */
-	private function get($url, $queryParams = null)
+	private function request($type, $url, $queryParams = null, $postData = null)
 	{
+		if(!in_array($type, self::REQUEST_TYPES)) {
+			throw new Exception("Error: Unexpected request type: $type.");
+		}
+
 		$formattedUrl = $this->formatQuery($url, $queryParams);
 		$ch = $this->ch;
 
 		if(self::VERBOSE) {
-			echo "[Info]: GET $formattedUrl\n";
+			echo "[Info]: $type $formattedUrl\n";
+		}
+
+		$payload = "";
+		if(!empty($postData)) {
+			$payload = http_build_query($postData);
 		}
 
 		curl_setopt_array($ch, [
 			CURLOPT_URL           => $formattedUrl,
-			CURLOPT_CUSTOMREQUEST => "GET",
+			CURLOPT_CUSTOMREQUEST => $type,
+			CURLOPT_POSTFIELDS    => $payload
 		]);
 		$result = curl_exec($ch);
 
@@ -100,11 +124,6 @@ class wasCourseScraper
 		}
 
 		return $result;
-	}
-
-	private function post($url, $queryParams = null, $postData = null)
-	{
-
 	}
 
 	/**
@@ -118,6 +137,8 @@ class wasCourseScraper
 	 */
 	private function formatQuery($url, $queryParams)
 	{
+		$url = trim($url);
+
 		if(empty($url)) {
 			throw new Exception("Error: invalid URL: |$url|");
 		}
@@ -125,10 +146,6 @@ class wasCourseScraper
 		if(empty($queryParams)) {
 			return $url;
 		}
-
-//		if(substr($url, -strlen($url)) !== "/") {
-//			$url .= "/";
-//		}
 
 		return $url . "?" . http_build_query($queryParams);
 	}
@@ -144,8 +161,6 @@ class wasCourseScraper
 	{
 		$curl = curl_init();
 
-		$a = true;
-
 		curl_setopt_array($curl, [
 			CURLOPT_COOKIEJAR      => $cookieJar,
 			CURLOPT_COOKIEFILE     => $cookieJar,
@@ -155,9 +170,8 @@ class wasCourseScraper
 			CURLOPT_TIMEOUT        => 30,
 			CURLOPT_HTTP_VERSION   => CURL_HTTP_VERSION_1_1,
 			CURLOPT_USERAGENT      => 'Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.17 (KHTML, like Gecko) Chrome/24.0.1312.52 Safari/537.17',
-			CURLOPT_VERBOSE        => false,
-			//			CURLOPT_VERBOSE        => true,
-			CURLOPT_FOLLOWLOCATION => true,
+			CURLOPT_VERBOSE        => true,
+			CURLOPT_FOLLOWLOCATION => false,
 			CURLOPT_HEADER         => true
 		]);
 
